@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+python-multipart
+transformers==4.41.2
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+Pillow
+numpy
+scipy
+matplotlib

@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VLM Explorer — How CLIP Connects Images and Text</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #232736;
+    --border: #2e3347;
+    --text: #e4e6f0;
+    --text-dim: #8b90a5;
+    --accent: #6c8cff;
+    --accent2: #a78bfa;
+    --green: #34d399;
+    --orange: #fb923c;
+    --red: #f87171;
+    --cyan: #22d3ee;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* Header */
+  header {
+    text-align: center;
+    padding: 3rem 1rem 2rem;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 0.5rem;
+  }
+  header p {
+    color: var(--text-dim);
+    max-width: 640px;
+    margin: 0 auto;
+    font-size: 0.95rem;
+  }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 1.5rem 1rem 0;
+  }
+  .tab-btn {
+    padding: 0.6rem 1.5rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-dim);
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .tab-btn:hover { border-color: var(--accent); color: var(--text); }
+  .tab-btn.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+
+  /* Main container */
+  .container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 1.5rem 1rem 3rem;
+  }
+
+  /* Panel (tab content) */
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* Input area */
+  .input-area {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+  .input-row {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .input-group { flex: 1; min-width: 250px; }
+  .input-group label {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.4rem;
+  }
+  .input-group input[type="text"],
+  .input-group textarea {
+    width: 100%;
+    padding: 0.7rem 1rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text);
+    font-size: 0.95rem;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .input-group input:focus,
+  .input-group textarea:focus {
+    border-color: var(--accent);
+  }
+  .input-group textarea {
+    resize: vertical;
+    min-height: 60px;
+  }
+
+  /* Image preview */
+  .image-preview {
+    width: 160px;
+    height: 160px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface2);
+    position: relative;
+  }
+  .image-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .image-preview .placeholder {
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    text-align: center;
+  }
+
+  /* Run button */
+  .btn-row {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1rem;
+    flex-wrap: wrap;
+  }
+  .btn {
+    padding: 0.7rem 2rem;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #fff;
+  }
+  .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+  .btn-primary:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .btn-secondary {
+    background: var(--surface2);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover { border-color: var(--accent); color: var(--text); }
+
+  /* Pipeline stages */
+  .pipeline { display: flex; flex-direction: column; gap: 1rem; }
+
+  .stage {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateY(12px);
+    transition: opacity 0.4s ease, transform 0.4s ease;
+  }
+  .stage.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .stage-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .stage-num {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .stage-title {
+    font-weight: 600;
+    font-size: 1rem;
+  }
+  .stage-desc {
+    color: var(--text-dim);
+    font-size: 0.82rem;
+    margin-left: auto;
+    max-width: 400px;
+    text-align: right;
+  }
+  .stage-body {
+    padding: 1.25rem;
+    display: none;
+  }
+  .stage-body.open { display: block; }
+
+  /* Stage content layouts */
+  .stage-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1rem;
+  }
+  .stage-box {
+    background: var(--surface2);
+    border-radius: 8px;
+    padding: 1rem;
+  }
+  .stage-box h4 {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+    margin-bottom: 0.6rem;
+  }
+  .stage-box img {
+    width: 100%;
+    border-radius: 6px;
+  }
+  .stage-box .full-img {
+    max-width: 300px;
+    margin: 0 auto;
+    display: block;
+  }
+
+  /* Heatmap grid */
+  .heatmap-grid {
+    display: inline-grid;
+    gap: 2px;
+    background: var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .heatmap-cell {
+    width: 32px;
+    height: 32px;
+    border-radius: 2px;
+  }
+
+  /* Token chips */
+  .token-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+  .token {
+    padding: 0.3rem 0.6rem;
+    border-radius: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.82rem;
+    color: var(--accent);
+  }
+
+  /* Similarity gauge */
+  .sim-gauge {
+    text-align: center;
+    padding: 1rem 0;
+  }
+  .sim-value {
+    font-size: 3rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent), var(--green));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .sim-label {
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    margin-top: 0.3rem;
+  }
+  .sim-bar-track {
+    width: 100%;
+    max-width: 400px;
+    height: 10px;
+    background: var(--surface2);
+    border-radius: 5px;
+    margin: 0.8rem auto 0;
+    overflow: hidden;
+  }
+  .sim-bar-fill {
+    height: 100%;
+    border-radius: 5px;
+    background: linear-gradient(90deg, var(--accent), var(--green));
+    transition: width 0.6s ease;
+  }
+
+  /* Zero-shot results */
+  .zs-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.6rem;
+  }
+  .zs-label {
+    width: 140px;
+    text-align: right;
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    flex-shrink: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .zs-bar-track {
+    flex: 1;
+    height: 24px;
+    background: var(--surface2);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .zs-bar-fill {
+    height: 100%;
+    border-radius: 6px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    transition: width 0.6s ease;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #fff;
+    min-width: fit-content;
+  }
+  .zs-score {
+    width: 60px;
+    text-align: right;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+  }
+
+  /* Spinner */
+  .spinner {
+    display: inline-block;
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    vertical-align: middle;
+    margin-right: 0.5rem;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Loading overlay */
+  .loading-msg {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-dim);
+  }
+
+  /* Sample images */
+  .sample-grid {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .sample-thumb {
+    width: 80px;
+    height: 80px;
+    border-radius: 8px;
+    border: 2px solid var(--border);
+    overflow: hidden;
+    cursor: pointer;
+    transition: border-color 0.2s;
+  }
+  .sample-thumb:hover { border-color: var(--accent); }
+  .sample-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  /* Responsive */
+  @media (max-width: 640px) {
+    header h1 { font-size: 1.5rem; }
+    .input-row { flex-direction: column; }
+    .image-preview { width: 100%; height: 200px; }
+    .stage-desc { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>VLM Explorer</h1>
+  <p>See how CLIP connects images and text — step by step, not as a black box. Upload an image, type a caption, and watch the pipeline unfold.</p>
+</header>
+
+<div class="tabs">
+  <button class="tab-btn active" onclick="switchTab('pipeline')">Pipeline Explorer</button>
+  <button class="tab-btn" onclick="switchTab('zeroshot')">Zero-Shot Classification</button>
+</div>
+
+<div class="container">
+
+  <!-- ============== PIPELINE TAB ============== -->
+  <div id="tab-pipeline" class="panel active">
+    <div class="input-area">
+      <div class="input-row">
+        <div class="image-preview" id="preview-box">
+          <span class="placeholder">Drop or click to upload</span>
+        </div>
+        <div class="input-group" style="flex:1">
+          <label>Image</label>
+          <input type="file" id="file-input" accept="image/*" style="display:none">
+          <div class="sample-grid" id="sample-thumbs"></div>
+        </div>
+        <div class="input-group" style="flex:2">
+          <label>Text query / caption</label>
+          <input type="text" id="text-input" value="a dog running on the beach" placeholder="e.g. a cat sitting on a couch">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="run-btn" onclick="runPipeline()">Run Pipeline</button>
+      </div>
+    </div>
+
+    <div id="pipeline-stages" class="pipeline"></div>
+  </div>
+
+  <!-- ============== ZERO-SHOT TAB ============== -->
+  <div id="tab-zeroshot" class="panel">
+    <div class="input-area">
+      <div class="input-row">
+        <div class="image-preview" id="preview-box-zs">
+          <span class="placeholder">Drop or click to upload</span>
+        </div>
+        <div class="input-group" style="flex:1">
+          <label>Image</label>
+          <input type="file" id="file-input-zs" accept="image/*" style="display:none">
+          <div class="sample-grid" id="sample-thumbs-zs"></div>
+        </div>
+        <div class="input-group" style="flex:2">
+          <label>Candidate labels (comma-separated)</label>
+          <input type="text" id="labels-input" value="a dog, a cat, a car, a beach, a bird" placeholder="e.g. a cat, a dog, a car">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="run-btn-zs" onclick="runZeroShot()">Classify</button>
+      </div>
+    </div>
+    <div id="zs-results" class="pipeline"></div>
+  </div>
+
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let pipelineFile = null;
+let zsFile = null;
+const SAMPLES = ["sample_images/dog.jpg", "sample_images/cat.jpg", "sample_images/car.jpg"];
+
+// ---------------------------------------------------------------------------
+// Tab switching
+// ---------------------------------------------------------------------------
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('tab-' + name).classList.add('active');
+}
+
+// ---------------------------------------------------------------------------
+// File handling helpers
+// ---------------------------------------------------------------------------
+function setupFileInput(inputId, previewId, thumbContainerId, onFile) {
+  const input = document.getElementById(inputId);
+  const preview = document.getElementById(previewId);
+  const thumbs = document.getElementById(thumbContainerId);
+
+  preview.addEventListener('click', () => input.click());
+  preview.addEventListener('dragover', e => { e.preventDefault(); preview.style.borderColor = 'var(--accent)'; });
+  preview.addEventListener('dragleave', () => { preview.style.borderColor = ''; });
+  preview.addEventListener('drop', e => {
+    e.preventDefault();
+    preview.style.borderColor = '';
+    if (e.dataTransfer.files.length) {
+      input.files = e.dataTransfer.files;
+      input.dispatchEvent(new Event('change'));
+    }
+  });
+  input.addEventListener('change', () => {
+    if (input.files.length) {
+      const file = input.files[0];
+      onFile(file);
+      const reader = new FileReader();
+      reader.onload = e => {
+        preview.innerHTML = `<img src="${e.target.result}">`;
+      };
+      reader.readAsDataURL(file);
+    }
+  });
+
+  // Load sample thumbnails
+  SAMPLES.forEach(src => {
+    const div = document.createElement('div');
+    div.className = 'sample-thumb';
+    div.innerHTML = `<img src="${src}" alt="sample">`;
+    div.addEventListener('click', () => {
+      fetch(src).then(r => r.blob()).then(blob => {
+        const file = new File([blob], src.split('/').pop(), { type: 'image/jpeg' });
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        input.files = dt.files;
+        input.dispatchEvent(new Event('change'));
+        preview.innerHTML = `<img src="${src}">`;
+      });
+    });
+    thumbs.appendChild(div);
+  });
+}
+
+setupFileInput('file-input', 'preview-box', 'sample-thumbs', f => pipelineFile = f);
+setupFileInput('file-input-zs', 'preview-box-zs', 'sample-thumbs-zs', f => zsFile = f);
+
+// ---------------------------------------------------------------------------
+// Pipeline Explorer
+// ---------------------------------------------------------------------------
+async function runPipeline() {
+  const file = pipelineFile;
+  const text = document.getElementById('text-input').value.trim();
+  if (!file) return alert('Please upload an image first.');
+  if (!text) return alert('Please enter a text query.');
+
+  const btn = document.getElementById('run-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Running...';
+
+  const stagesEl = document.getElementById('pipeline-stages');
+  stagesEl.innerHTML = '<div class="loading-msg">Processing through CLIP pipeline...</div>';
+
+  const form = new FormData();
+  form.append('image', file);
+  form.append('text', text);
+
+  try {
+    const res = await fetch('/pipeline', { method: 'POST', body: form });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    renderPipelineStages(data);
+  } catch (err) {
+    stagesEl.innerHTML = `<div class="loading-msg" style="color:var(--red)">Error: ${err.message}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Run Pipeline';
+  }
+}
+
+function renderPipelineStages(data) {
+  const el = document.getElementById('pipeline-stages');
+
+  const stages = [
+    {
+      num: 0, title: 'Input', desc: 'The raw image and text query that enter the pipeline.',
+      body: `
+        <div class="stage-grid">
+          <div class="stage-box"><h4>Image</h4><img src="${data.input_image}" class="full-img"></div>
+          <div class="stage-box"><h4>Text Query</h4><p style="font-size:1.1rem;color:var(--text)">${document.getElementById('text-input').value}</p></div>
+        </div>`
+    },
+    {
+      num: 1, title: 'Patchify (Vision Tokenization)',
+      desc: `CLIP splits the ${data.patchify.grid_h}×${data.patchify.grid_w} resized image into ${data.patchify.num_patches} patches of ${data.patchify.patch_size}×${data.patchify.patch_size} pixels.`,
+      body: `
+        <div class="stage-grid">
+          <div class="stage-box"><h4>Patch Grid (${data.patchify.grid_h}×${data.patchify.grid_w} = ${data.patchify.num_patches} patches)</h4><img src="${data.patchify.image}"></div>
+          <div class="stage-box">
+            <h4>What just happened?</h4>
+            <p style="color:var(--text-dim);font-size:0.9rem">The model doesn't see pixels — it sees a grid of patches, each turned into a vector. CLIP's ViT encoder uses ${data.patchify.patch_size}×${data.patchify.patch_size} pixel patches, creating a ${data.patchify.grid_h}×${data.patchify.grid_w} grid from the ${224}×${224} image. Each of these ${data.patchify.num_patches} patches becomes an embedding vector of dimension ${data.vision_encoding.embedding_dim}.</p>
+          </div>
+        </div>`
+    },
+    {
+      num: 2, title: 'Vision Encoding',
+      desc: `Each of the ${data.vision_encoding.num_patches} patches becomes a ${data.vision_encoding.embedding_dim}-dimensional vector through the ViT encoder.`,
+      body: `
+        <div class="stage-grid">
+          <div class="stage-box">
+            <h4>Patch Embedding Heatmap (vector magnitude per patch)</h4>
+            ${renderHeatmap(data.vision_encoding.patch_heatmap)}
+          </div>
+          <div class="stage-box">
+            <h4>What just happened?</h4>
+            <p style="color:var(--text-dim);font-size:0.9rem">The ${data.vision_encoding.num_patches} patch vectors pass through 12 transformer layers, each applying self-attention so patches can "talk" to each other. The final CLS token embedding is projected into CLIP's shared ${data.vision_encoding.embedding_dim}-dimensional space. Brighter cells = higher-magnitude patch embeddings.</p>
+          </div>
+        </div>`
+    },
+    {
+      num: 3, title: 'Text Encoding',
+      desc: `The text is tokenized into ${data.text_encoding.tokens.length} subword pieces and encoded into a ${data.text_encoding.embedding_dim}-dimensional vector.`,
+      body: `
+        <div class="stage-grid">
+          <div class="stage-box">
+            <h4>Tokenized Text</h4>
+            <div class="token-list">${data.text_encoding.tokens.map(t => `<span class="token">${escapeHtml(t)}</span>`).join('')}</div>
+          </div>
+          <div class="stage-box">
+            <h4>What just happened?</h4>
+            <p style="color:var(--text-dim);font-size:0.9rem">CLIP's text encoder splits your text into subword tokens (like "running" → "runn" + "ing"), embeds each token, then runs them through a 12-layer transformer. The final token embedding is projected into the same ${data.text_encoding.embedding_dim}-dimensional space as the image — that's the key to cross-modal matching.</p>
+          </div>
+        </div>`
+    },
+    {
+      num: 4, title: 'Cross-Modal Alignment',
+      desc: 'Cosine similarity measures how close the image and text embeddings are in the shared vector space.',
+      body: `
+        <div class="sim-gauge">
+          <div class="sim-value">${data.alignment.cosine_similarity.toFixed(4)}</div>
+          <div class="sim-label">Cosine Similarity</div>
+          <div class="sim-bar-track"><div class="sim-bar-fill" style="width:${Math.max(0, data.alignment.cosine_similarity) * 100}%"></div></div>
+        </div>
+        <div style="text-align:center;margin-top:1rem">
+          <p style="color:var(--text-dim);font-size:0.9rem;max-width:500px;margin:0 auto">
+            This single number is how CLIP knows an image and a caption "match" — both were pushed into the same vector space during training.
+            Scores range from -1 (opposite) to 1 (identical meaning). Higher = better match.
+          </p>
+        </div>`
+    },
+    {
+      num: 5, title: 'Patch-Level Attention Overlay',
+      desc: 'A heatmap showing which patches of the image are most relevant to the text query.',
+      body: `
+        <div class="stage-grid">
+          <div class="stage-box"><h4>Attention / Relevance Heatmap</h4><img src="${data.attention_overlay.image}"></div>
+          <div class="stage-box">
+            <h4>What just happened?</h4>
+            <p style="color:var(--text-dim);font-size:0.9rem">We computed cosine similarity between each patch's projected embedding and the text embedding. Red/warm areas are patches the model considers most relevant to your text query. This is an approximation of the cross-attention mechanism that makes VLMs so powerful — you can see <em>where</em> in the image the model is "looking" when it reads your text.</p>
+          </div>
+        </div>`
+    },
+  ];
+
+  el.innerHTML = stages.map(s => `
+    <div class="stage" id="stage-${s.num}">
+      <div class="stage-header" onclick="toggleStage(${s.num})">
+        <div class="stage-num">${s.num}</div>
+        <div class="stage-title">${s.title}</div>
+        <div class="stage-desc">${s.desc}</div>
+      </div>
+      <div class="stage-body open">${s.body}</div>
+    </div>
+  `).join('');
+
+  // Animate stages in sequence
+  stages.forEach((_, i) => {
+    setTimeout(() => {
+      document.getElementById(`stage-${i}`).classList.add('visible');
+    }, i * 120);
+  });
+}
+
+function toggleStage(n) {
+  const body = document.querySelector(`#stage-${n} .stage-body`);
+  body.classList.toggle('open');
+}
+
+// ---------------------------------------------------------------------------
+// Zero-Shot Classification
+// ---------------------------------------------------------------------------
+async function runZeroShot() {
+  const file = zsFile;
+  const labels = document.getElementById('labels-input').value.trim();
+  if (!file) return alert('Please upload an image first.');
+  if (!labels) return alert('Please enter at least one label.');
+
+  const btn = document.getElementById('run-btn-zs');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Classifying...';
+
+  const el = document.getElementById('zs-results');
+  el.innerHTML = '<div class="loading-msg">Running zero-shot classification...</div>';
+
+  const form = new FormData();
+  form.append('image', file);
+  form.append('labels', labels);
+
+  try {
+    const res = await fetch('/zero-shot', { method: 'POST', body: form });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    renderZeroShot(data);
+  } catch (err) {
+    el.innerHTML = `<div class="loading-msg" style="color:var(--red)">Error: ${err.message}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Classify';
+  }
+}
+
+function renderZeroShot(data) {
+  const el = document.getElementById('zs-results');
+  const maxSim = Math.max(...data.results.map(r => r.similarity));
+  const minSim = Math.min(...data.results.map(r => r.similarity));
+  const range = maxSim - minSim || 1;
+
+  el.innerHTML = `
+    <div class="stage visible">
+      <div class="stage-header">
+        <div class="stage-num">★</div>
+        <div class="stage-title">Zero-Shot Classification Results</div>
+        <div class="stage-desc">CLIP compares the image against every label — no training needed.</div>
+      </div>
+      <div class="stage-body open">
+        <div class="stage-grid">
+          <div class="stage-box"><h4>Input Image</h4><img src="${data.input_image}" class="full-img"></div>
+          <div class="stage-box">
+            <h4>Ranked by Similarity</h4>
+            ${data.results.map(r => `
+              <div class="zs-bar-row">
+                <div class="zs-label">${escapeHtml(r.label)}</div>
+                <div class="zs-bar-track">
+                  <div class="zs-bar-fill" style="width:${((r.similarity - minSim) / range) * 100}%">${(r.probability * 100).toFixed(1)}%</div>
+                </div>
+                <div class="zs-score">${r.similarity.toFixed(3)}</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        <div style="text-align:center;margin-top:1rem">
+          <p style="color:var(--text-dim);font-size:0.9rem;max-width:500px;margin:0 auto">
+            CLIP computes similarity between the image and <em>each</em> text label independently. The label with the highest cosine similarity wins. This is "zero-shot" because CLIP was never explicitly trained on these specific classes — it generalizes from its broad pre-training.
+          </p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Utilities
+// ---------------------------------------------------------------------------
+function renderHeatmap(grid) {
+  const h = grid.length, w = grid[0].length;
+  let html = `<div class="heatmap-grid" style="grid-template-columns:repeat(${w}, 32px)">`;
+  for (let i = 0; i < h; i++) {
+    for (let j = 0; j < w; j++) {
+      const v = grid[i][j];
+      const r = Math.round(30 + v * 225);
+      const g = Math.round(50 + (1 - Math.abs(v - 0.5) * 2) * 150);
+      const b = Math.round(220 - v * 180);
+      html += `<div class="heatmap-cell" style="background:rgb(${r},${g},${b})" title="Patch [${i},${j}]: ${v.toFixed(3)}"></div>`;
+    }
+  }
+  html += '</div>';
+  return html;
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+</script>
+</body>
+</html>
