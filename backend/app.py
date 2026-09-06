@@ -16,6 +16,11 @@ from fastapi.responses import FileResponse, JSONResponse
 from transformers import CLIPModel, CLIPProcessor
 import torch
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+
 app = FastAPI(title="VLM Explorer")
 
 # ---------------------------------------------------------------------------
@@ -100,6 +105,7 @@ async def run_pipeline(
     cls_embedding = last_hidden[:, 0, :]    # CLS token → [1, 768]
 
     # Project through CLIP's visual projection to get the final image embedding
+    cls_embedding = model.vision_model.post_layernorm(cls_embedding)
     image_embeds = model.visual_projection(cls_embedding)
     image_embeds_norm = image_embeds / image_embeds.norm(dim=-1, keepdim=True)
 
@@ -135,8 +141,7 @@ async def run_pipeline(
     token_ids = inputs["input_ids"][0].tolist()
     tokens = [processor.tokenizer.decode([tid]) for tid in token_ids]
     # Filter out special tokens for cleaner display
-    display_tokens = [t.strip() for t in tokens if t.strip() and t.strip() not in ("[CLS]", "[SEP]", "<|startoftext|>", "</tool_call>")]
-
+    display_tokens = [t.strip() for t in tokens if t.strip() and t.strip() not in ("[CLS]", "[SEP]", "<|startoftext|>", "<|endoftext|>")]
     # ------------------------------------------------------------------
     # Stage 4 — Cross-modal alignment (cosine similarity)
     # ------------------------------------------------------------------
@@ -150,10 +155,28 @@ async def run_pipeline(
     # Approximate patch-text relevance by computing cosine similarity between
     # each patch's hidden-state vector and the text embedding (both projected).
     # Project patch features through the visual projection
-    patch_features_flat = patch_features.squeeze(0)  # [49, 768]
-    patch_proj = model.visual_projection(patch_features_flat)  # [49, 64] (projection dim is 64 for CLIP ViT-B/32)
-    patch_proj_norm = patch_proj / patch_proj.norm(dim=-1, keepdim=True)
+    # MaskCLIP-style dense features: bypass the last layer's query-key
+    # attention (which blends every patch toward the CLS token) and use
+    # only the value projection, so each patch keeps its own local identity.
+    last_layer = model.vision_model.encoder.layers[-1]
+    hidden_pre_last = vision_out.hidden_states[-2]  # input to the last layer, [1, 50, 768]
 
+    with torch.no_grad():
+        residual = hidden_pre_last
+        normed = last_layer.layer_norm1(hidden_pre_last)
+        v = last_layer.self_attn.v_proj(normed)
+        attn_out = last_layer.self_attn.out_proj(v)   # identity attention: no q/k softmax
+        modified = residual + attn_out
+
+        residual2 = modified
+        normed2 = last_layer.layer_norm2(modified)
+        mlp_out = last_layer.mlp(normed2)
+        modified = residual2 + mlp_out
+
+    patch_features_flat = modified[:, 1:, :].squeeze(0)  # [49, 768], dense per-patch features
+    patch_features_flat = model.vision_model.post_layernorm(patch_features_flat)
+    patch_proj = model.visual_projection(patch_features_flat)
+    patch_proj_norm = patch_proj / patch_proj.norm(dim=-1, keepdim=True)
     # Text embedding already projected and normalized: [1, 64]
     # Compute per-patch cosine similarity with text
     relevance_scores = torch.mm(patch_proj_norm, text_embeds_norm.t()).squeeze()  # [49]
@@ -165,14 +188,18 @@ async def run_pipeline(
     relevance_grid = relevance_norm.reshape(grid_h, grid_w)
 
     # Create heatmap overlay on original image
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import matplotlib.cm as cm
 
     fig, ax = plt.subplots(1, 1, figsize=(4, 4), dpi=72)
     ax.imshow(resized)
-    ax.imshow(relevance_grid, cmap="jet", alpha=0.6, vmin=0, vmax=1)
+    ax.imshow(
+        relevance_grid,
+        cmap="jet",
+        alpha=0.45,
+        vmin=0,
+        vmax=1,
+        extent=[0, image_size, image_size, 0],
+        interpolation="bilinear",
+    )
     ax.axis("off")
     fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
     buf = io.BytesIO()
@@ -258,9 +285,10 @@ async def zero_shot_classify(
 
 
 # ---------------------------------------------------------------------------
-# Serve the frontend as static files
+# Serve the frontend and sample images as static files
 # ---------------------------------------------------------------------------
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
+app.mount("/sample_images", StaticFiles(directory="sample_images"), name="sample_images")
 
 
 @app.get("/")
